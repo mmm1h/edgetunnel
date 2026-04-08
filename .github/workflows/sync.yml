@@ -7,17 +7,25 @@ on:
   schedule:
     - cron: "0 0 * * *" # every day
   workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: "Deploy to Cloudflare even if upstream has no new commits"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   sync_latest_from_upstream:
     name: Sync latest commits from upstream repo
     runs-on: ubuntu-latest
     if: ${{ github.event.repository.fork }}
+    outputs:
+      has_new_commits: ${{ steps.sync.outputs.has_new_commits }}
 
     steps:
       # Step 1: run a standard checkout action
       - name: Checkout target repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # Step 2: run the sync action
       - name: Sync upstream changes
@@ -32,9 +40,35 @@ jobs:
           # Set test_mode true to run tests instead of the true action!!
           test_mode: false
 
+      - name: Print sync result
+        run: echo "has_new_commits=${{ steps.sync.outputs.has_new_commits }}"
+
       - name: Sync check
         if: failure()
         run: |
           echo "[Error] 由于上游仓库的 workflow 文件变更，导致 GitHub 自动暂停了本次自动更新，你需要手动 Sync Fork 一次，详细教程请查看项目README.md "
           echo "[Error] Due to a change in the workflow file of the upstream repository, GitHub has automatically suspended the scheduled automatic update. You need to manually sync your fork. Please refer to the project README.md for instructions. "
           exit 1
+
+  deploy_to_cloudflare:
+    name: Deploy to Cloudflare Workers
+    needs: sync_latest_from_upstream
+    runs-on: ubuntu-latest
+    if: ${{ github.event.repository.fork && needs.sync_latest_from_upstream.result == 'success' && (needs.sync_latest_from_upstream.outputs.has_new_commits == 'true' || github.event.inputs.force_deploy == 'true') }}
+
+    steps:
+      - name: Checkout latest main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+
+      - name: Deployment summary
+        run: echo "Cloudflare Workers deployment finished."
