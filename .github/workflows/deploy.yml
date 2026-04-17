@@ -1,0 +1,70 @@
+name: Deploy to Cloudflare
+
+on:
+  workflow_run:
+    workflows:
+      - Upstream Sync
+    types:
+      - completed
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-to-cloudflare-main
+  cancel-in-progress: false
+
+jobs:
+  deploy_to_cloudflare:
+    name: Deploy to Cloudflare Workers
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
+
+    steps:
+      - name: Checkout latest main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Decide whether deployment is needed
+        id: deploy_gate
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          should_deploy=false
+          reason="No new commits detected on main."
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            should_deploy=true
+            reason="Manual dispatch."
+          else
+            current_sha=$(git rev-parse HEAD)
+            if [ "$current_sha" != "$WORKFLOW_HEAD_SHA" ]; then
+              should_deploy=true
+              reason="Main changed after upstream sync."
+            fi
+          fi
+
+          echo "should_deploy=$should_deploy" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare Wrangler config with KV binding
+        if: ${{ steps.deploy_gate.outputs.should_deploy == 'true' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          KV_NAMESPACE_TITLE: edgetunnel
+          KV_BINDING_NAME: KV
+        run: node .github/scripts/prepare-wrangler-config.mjs
+
+      - name: Deploy to Cloudflare Workers
+        if: ${{ steps.deploy_gate.outputs.should_deploy == 'true' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config wrangler.deploy.toml
+
+      - name: Deployment summary
+        run: echo "${{ steps.deploy_gate.outputs.reason }}"
