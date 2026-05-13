@@ -27,7 +27,7 @@ function upsertKvNamespaceBinding(config, eol, bindingName, namespaceId) {
   const lines = config.split(/\r?\n/);
   const kept = [];
   const bindingPattern = new RegExp(
-    `^\\s*binding\\s*=\\s*["']${escapeRegExp(bindingName)}["']\\s*$`,
+    `^\\s*binding\\s*=\\s*["']${escapeRegExp(bindingName)}["']\\s*(?:#.*)?$`,
     'm',
   );
   let replaced = false;
