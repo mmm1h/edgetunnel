@@ -109,6 +109,8 @@ function _0xDec(arr, key) {
 					let html = await res.text();
 					html = html.replaceAll('/admin/', '/' + _prefix + 'admin/');
 					html = html.replaceAll('/sub?', '/' + _prefix + 'sub?');
+					html = html.replaceAll("href = '/logout'", "href = '/" + _prefix + "logout'");
+					html = html.replaceAll('/version?', '/' + _prefix + 'version?');
 					return new Response(html, {
 						status: res.status,
 						headers: {
