@@ -64,7 +64,7 @@ async function main() {
   }
 
   // 需要删除的旧 Worker 脚本列表
-  const workersToDelete = ['edgetunnel', 'homepage'];
+  const workersToDelete = ['edgetunnel'];
   for (const worker of workersToDelete) {
     console.log(`正在删除旧的 Worker 脚本 (${worker})...`);
     try {
