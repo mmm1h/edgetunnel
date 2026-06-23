@@ -144,6 +144,33 @@ function _0xDec(arr, key) {
   code = code.replace(/'Location': '\/admin'/g, `'Location': '/' + _prefix + 'admin'`);
   code = code.replace(/'Location': '\/login'/g, `'Location': '/' + _prefix + 'login'`);
 
+  // 区分大小写访问路径剥离前缀，确保后台 API 正常工作
+  code = code.replace(
+    /const 区分大小写访问路径 = url\.pathname\.slice\(1\);/g,
+    `let 区分大小写访问路径 = url.pathname.slice(1);
+				if (_prefix && 区分大小写访问路径.startsWith(_prefix)) {
+					区分大小写访问路径 = 区分大小写访问路径.slice(_prefix.length);
+				}`
+  );
+
+  // 动态修改 /sub 相关的重定向与内部请求链接，自动注入 UUID 前缀
+  code = code.replace(
+    /'Location': `\/sub\?\${params\.toString\(\)}`/g,
+    `'Location': '/' + _prefix + 'sub?' + params.toString()`
+  );
+  code = code.replace(
+    /'\/sub\?target=mixed&token='/g,
+    `'/' + _prefix + 'sub?target=mixed&token='`
+  );
+  code = code.replace(
+    /'\/sub\?token='/g,
+    `'/' + _prefix + 'sub?token='`
+  );
+  code = code.replace(
+    /"Profile-web-page-url": url\.protocol \+ '\/\/' \+ url\.host \+ '\/admin',/g,
+    `"Profile-web-page-url": url.protocol + '//' + url.host + '/' + _prefix + 'admin',`
+  );
+
 
   // 5. 注入第三方无害数学库死代码（打碎 AST 指纹相似度比对）
   log('正在注入无害数学库噪声代码 (破坏 AST 相似度哈希)...');
