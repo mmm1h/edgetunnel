@@ -58,6 +58,12 @@ jobs:
           KV_BINDING_NAME: KV
         run: node .github/scripts/prepare-wrangler-config.mjs
 
+      - name: Obfuscate Worker Script
+        if: ${{ steps.deploy_gate.outputs.should_deploy == 'true' }}
+        run: |
+          npm install javascript-obfuscator
+          npx javascript-obfuscator _worker.js --output _worker.js --config .github/obfuscator-config.json
+
       - name: Deploy to Cloudflare Workers
         if: ${{ steps.deploy_gate.outputs.should_deploy == 'true' }}
         uses: cloudflare/wrangler-action@v3

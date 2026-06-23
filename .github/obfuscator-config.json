@@ -1,0 +1,22 @@
+{
+  "compact": true,
+  "controlFlowFlattening": false,
+  "deadCodeInjection": false,
+  "debugProtection": false,
+  "disableConsoleOutput": false,
+  "identifierNamesGenerator": "hexadecimal",
+  "log": false,
+  "numbersToExpressions": true,
+  "renameGlobals": false,
+  "selfDefending": false,
+  "simplify": true,
+  "splitStrings": true,
+  "splitStringsChunkLength": 10,
+  "stringArray": true,
+  "stringArrayCallsTransform": true,
+  "stringArrayEncoding": ["base64"],
+  "stringArrayThreshold": 0.8,
+  "target": "browser-no-eval",
+  "transformObjectKeys": true,
+  "unicodeEscapeSequence": true
+}
