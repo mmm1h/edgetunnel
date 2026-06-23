@@ -24,7 +24,7 @@ async function cloudflareRequest(path, init = {}) {
 
   if (!response.ok || payload?.success === false) {
     const details = payload?.errors?.map((item) => item.message).filter(Boolean).join('; ');
-    fail(`Cloudflare API 请求失败：${details || `${response.status} ${response.statusText}`}`);
+    throw new Error(details || `${response.status} ${response.statusText}`);
   }
 
   return payload;
@@ -70,6 +70,6 @@ async function main() {
 }
 
 main().catch(err => {
-  console.error(err);
+  console.error('执行过程中发生未捕获错误:', err);
   process.exit(1);
 });
