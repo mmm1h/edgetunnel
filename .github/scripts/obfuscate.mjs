@@ -88,32 +88,43 @@ function _0xDec(arr, key) {
   code = code.replace(/env\.GO2SOCKS5/g, 'env.REMOTE_GATEWAY_CONFIG');
 
 
-  // 4. 动态路由前缀自动植入（基于 UUID 前 8 位）
-  log('正在进行动态路由前缀重构...');
-  // 注入获取 UUID 前缀的逻辑
+  // 4. 动态路由前缀自动置入与剥离，以及 HTML/重定向路径动态重写
+  log('正在进行动态路由前缀重构与剥离...');
+  const prefixStripper = `const 原始访问路径 = url.pathname.slice(1).toLowerCase();
+		const _prefix = (userID && typeof userID === 'string') ? userID.split('-')[0].toLowerCase() + '-' : '';
+		let 访问路径 = 原始访问路径;
+		if (_prefix && 原始访问路径.startsWith(_prefix)) {
+			访问路径 = 原始访问路径.slice(_prefix.length);
+		} else if (原始访问路径 === 'admin' || 原始访问路径.startsWith('admin/') || 原始访问路径 === 'login' || 原始访问路径 === 'logout' || 原始访问路径 === 'sub' || 原始访问路径 === 'version' || 原始访问路径 === 'robots.txt') {
+			return new Response(await nginx(), { status: 200, headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
+		}`;
+
   code = code.replace(
     /const 访问路径 = url\.pathname\.slice\(1\)\.toLowerCase\(\);/g,
-    `const 访问路径 = url.pathname.slice(1).toLowerCase();\n\t\tconst _prefix = (userID && typeof userID === 'string') ? userID.split('-')[0].toLowerCase() + '-' : '';`
+    prefixStripper
   );
 
-  // 只对用户直接请求的登录入口、管理主页、退出和订阅前置路径添加前缀
-  // 这样可以规避外部爬虫的主动探测扫描，同时确保网页内发起的子请求（如 admin/config.json）能被正常处理
-  code = code.replace(/访问路径 === 'version'/g, `访问路径 === _prefix + 'version'`);
-  code = code.replace(/访问路径 === 'login'/g, `访问路径 === _prefix + 'login'`);
-  code = code.replace(/访问路径 === 'logout'/g, `访问路径 === _prefix + 'logout'`);
-  code = code.replace(/访问路径 === 'sub'/g, `访问路径 === _prefix + 'sub'`);
-  code = code.replace(/访问路径 === 'robots\.txt'/g, `访问路径 === _prefix + 'robots.txt'`);
+  // 拦截并重写返回给浏览器的后台 HTML，将其中硬编码的 /admin/ 接口调用动态加上 UUID 前缀以绕过 WAF
+  const adminHtmlRewriter = `const res = await fetch(Pages静态页面 + '/admin' + url.search);
+					let html = await res.text();
+					html = html.replaceAll('/admin/', '/' + _prefix + 'admin/');
+					return new Response(html, {
+						status: res.status,
+						headers: {
+							...Object.fromEntries(res.headers),
+							'Content-Type': 'text/html; charset=UTF-8',
+							'Cache-Control': 'no-store'
+						}
+					});`;
 
-  // 对于 admin 路由：访问路径 === 'admin' 或者是 admin/ 开头的子路由
-  // 我们改造成：
-  // 访问路径 === _prefix + 'admin' || (访问路径.startsWith('admin/') && (访问路径.slice(6) !== '' || 访问路径 === 'admin/'))
-  // 注意，原来的判定是：访问路径 === 'admin' || 访问路径.startsWith('admin/')
-  // 我们在替换时，为了确保 AJAX 请求 admin/config.json 能够被带 Cookie 匹配，而不需要改前缀，
-  // 我们保持 admin/ 判定不变（因为后台自带了 auth 验证，未授权的人直接访问 /admin/config.json 也会被 Cookie 校验拦截返回 302 /login）
   code = code.replace(
-    /访问路径 === 'admin' \|\| 访问路径\.startsWith\('admin\/'\)/g,
-    `访问路径 === _prefix + 'admin' || 访问路径.startsWith('admin/')`
+    /return fetch\(Pages静态页面 \+ '\/admin' \+ url\.search\);/g,
+    adminHtmlRewriter
   );
+
+  // 动态修改重定向地址，在重定向到 admin 或 login 时自动添加前缀
+  code = code.replace(/'Location': '\/admin'/g, `'Location': '/' + _prefix + 'admin'`);
+  code = code.replace(/'Location': '\/login'/g, `'Location': '/' + _prefix + 'login'`);
 
 
   // 5. 注入第三方无害数学库死代码（打碎 AST 指纹相似度比对）
