@@ -69,7 +69,7 @@ jobs:
         if: ${{ steps.deploy_gate.outputs.should_deploy == 'true' }}
         run: |
           npm install javascript-obfuscator
-          npx javascript-obfuscator _worker.js --output _worker.js --config .github/obfuscator-config.json
+          node .github/scripts/obfuscate.mjs
 
       - name: Deploy to Cloudflare Workers
         if: ${{ steps.deploy_gate.outputs.should_deploy == 'true' }}

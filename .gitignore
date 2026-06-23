@@ -17,6 +17,8 @@ GRAINTCP_*
 # Cloudflare Workers
 .wrangler/
 wrangler-install.log
+app.js
+wrangler.deploy.toml
 
 # IDE
 .vscode/

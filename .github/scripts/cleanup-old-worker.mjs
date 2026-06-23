@@ -34,17 +34,22 @@ async function main() {
   if (!CLOUDFLARE_API_TOKEN) fail('缺少环境变量 `CLOUDFLARE_API_TOKEN`。');
   if (!CLOUDFLARE_ACCOUNT_ID) fail('缺少环境变量 `CLOUDFLARE_ACCOUNT_ID`。');
 
-  console.log('正在查找与 edgetunnel 关联的自定义域名...');
+  console.log('正在查找与 edgetunnel 或 homepage 关联的自定义域名...');
   let domains = [];
   try {
     const domainsPayload = await cloudflareRequest(`/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/domains`);
     domains = domainsPayload.result || [];
   } catch (err) {
-    console.log('获取自定义域名列表失败，可能未配置任何自定义域名：', err.message);
+    console.log('获取自定义域名列表失败：', err.message);
   }
   
-  // 查找指向 "edgetunnel" worker 或主机名为 "edge.hmhi.top" 的自定义域名
-  const oldDomains = domains.filter(d => d.service === 'edgetunnel' || d.hostname === 'edge.hmhi.top');
+  // 查找指向 "edgetunnel" 或 "homepage" 服务的自定义域名，或者特定域名
+  const targetHostnames = ['edge.hmhi.top', 'z4w7e9.hmhi.top'];
+  const oldDomains = domains.filter(d => 
+    d.service === 'edgetunnel' || 
+    d.service === 'homepage' || 
+    targetHostnames.includes(d.hostname)
+  );
   
   for (const domain of oldDomains) {
     console.log(`正在删除自定义域名映射: ${domain.hostname} (ID: ${domain.id})...`);
@@ -58,14 +63,18 @@ async function main() {
     }
   }
 
-  console.log('正在删除旧的 Worker 脚本 (edgetunnel)...');
-  try {
-    await cloudflareRequest(`/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/edgetunnel`, {
-      method: 'DELETE'
-    });
-    console.log('已成功删除旧的 Worker (edgetunnel)。');
-  } catch (err) {
-    console.log('未找到 edgetunnel 脚本或已被删除：', err.message);
+  // 需要删除的旧 Worker 脚本列表
+  const workersToDelete = ['edgetunnel', 'homepage'];
+  for (const worker of workersToDelete) {
+    console.log(`正在删除旧的 Worker 脚本 (${worker})...`);
+    try {
+      await cloudflareRequest(`/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${worker}`, {
+        method: 'DELETE'
+      });
+      console.log(`已成功删除旧的 Worker (${worker})。`);
+    } catch (err) {
+      console.log(`未找到 ${worker} 脚本或已被删除：`, err.message);
+    }
   }
 }
 
