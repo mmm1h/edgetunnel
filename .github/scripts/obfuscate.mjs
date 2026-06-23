@@ -108,6 +108,7 @@ function _0xDec(arr, key) {
   const adminHtmlRewriter = `const res = await fetch(Pages静态页面 + '/admin' + url.search);
 					let html = await res.text();
 					html = html.replaceAll('/admin/', '/' + _prefix + 'admin/');
+					html = html.replaceAll('/sub?', '/' + _prefix + 'sub?');
 					return new Response(html, {
 						status: res.status,
 						headers: {
