@@ -126,8 +126,8 @@ function _0xDec(arr, key) {
   // 拦截并重写返回给浏览器的登录 HTML，将其中提交表单的 /login 接口及跳转的 /admin 地址动态加上 UUID 前缀
   const loginHtmlRewriter = `const res = await fetch(Pages静态页面 + '/login');
 					let html = await res.text();
-					html = html.replace("fetch('/login'", "fetch('/' + _prefix + 'login'");
-					html = html.replace("window.location.href = '/admin'", "window.location.href = '/' + _prefix + 'admin'");
+					html = html.replace("fetch('/login'", "fetch('/" + _prefix + "login'");
+					html = html.replace("window.location.href = '/admin'", "window.location.href = '/" + _prefix + "admin'");
 					return new Response(html, {
 						status: res.status,
 						headers: res.headers
