@@ -43,11 +43,10 @@ async function main() {
     console.log('获取自定义域名列表失败：', err.message);
   }
   
-  // 查找指向 "edgetunnel" 或 "homepage" 服务的自定义域名，或者特定域名
+  // 查找指向 "edgetunnel" 服务的自定义域名，或者特定域名
   const targetHostnames = ['edge.hmhi.top', 'z4w7e9.hmhi.top'];
   const oldDomains = domains.filter(d => 
     d.service === 'edgetunnel' || 
-    d.service === 'homepage' || 
     targetHostnames.includes(d.hostname)
   );
   

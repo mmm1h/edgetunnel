@@ -78,7 +78,7 @@ function _0xDec(arr, key) {
   log('正在进行无害化环境变量名称重映射...');
   code = code.replace(
     /const 管理员密码 = env\.ADMIN \|\| env\.admin \|\| env\.PASSWORD \|\| env\.password \|\| env\.pswd \|\| env\.TOKEN \|\| env\.KEY \|\| env\.UUID \|\| env\.uuid;/g,
-    'const 管理员密码 = env.SITE_ACCESS_KEY;'
+    'const 管理员密码 = env.ADMIN_PASS || env.SITE_ACCESS_KEY;'
   );
   code = code.replace(
     /const envUUID = env\.UUID \|\| env\.uuid;/g,
