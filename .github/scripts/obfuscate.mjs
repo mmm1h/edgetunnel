@@ -9,6 +9,25 @@ function log(message) {
   console.log(`[Obfuscator] ${message}`);
 }
 
+function replaceChecked(label, source, pattern, replacement, { min, max }) {
+  let matches = 0;
+  const replaceMatch = (...args) => {
+    matches++;
+    return typeof replacement === 'function' ? replacement(...args) : replacement;
+  };
+  const result = typeof pattern === 'string'
+    ? source.replaceAll(pattern, replaceMatch)
+    : source.replace(pattern, replaceMatch);
+
+  log(`替换校验 [${label}]: 命中 ${matches} 次，期望 ${min}-${max} 次`);
+  if (matches < min || matches > max) {
+    console.error(`[Obfuscator] 替换校验失败 [${label}]: 命中 ${matches} 次，期望 ${min}-${max} 次`);
+    process.exit(1);
+  }
+
+  return result;
+}
+
 // 随机密钥生成器
 function generateRandomKey(length = 8) {
   const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -62,13 +81,31 @@ function _0xDec(arr, key) {
   const encryptedLocations = xorEncrypt(sensitiveStrings.CF_Speed_Locations, xorKey);
 
   // 'https://edt-pages.github.io' -> _0xDec([1, 2, 3], 'key')
-  code = code.replaceAll("'https://edt-pages.github.io'", `_0xDec([${encryptedPages.join(',')}], '${xorKey}')`);
+  code = replaceChecked(
+    'xor.pages-static',
+    code,
+    "'https://edt-pages.github.io'",
+    `_0xDec([${encryptedPages.join(',')}], '${xorKey}')`,
+    { min: 1, max: 1 }
+  );
   
-  // 'https://api.telegram.org/bot' -> _0xDec([1, 2, 3], 'key')
-  code = code.replaceAll("'https://api.telegram.org/bot'", `_0xDec([${encryptedTg.join(',')}], '${xorKey}')`);
+  // `https://api.telegram.org/bot${token}...` -> `${_0xDec([...], 'key')}${token}...`
+  code = replaceChecked(
+    'xor.telegram-api-template-prefix',
+    code,
+    '`https://api.telegram.org/bot',
+    `\`\${_0xDec([${encryptedTg.join(',')}], '${xorKey}')}`,
+    { min: 1, max: 1 }
+  );
   
   // 'https://speed.cloudflare.com/locations' -> _0xDec([1, 2, 3], 'key')
-  code = code.replaceAll("'https://speed.cloudflare.com/locations'", `_0xDec([${encryptedLocations.join(',')}], '${xorKey}')`);
+  code = replaceChecked(
+    'xor.cf-speed-locations',
+    code,
+    "'https://speed.cloudflare.com/locations'",
+    `_0xDec([${encryptedLocations.join(',')}], '${xorKey}')`,
+    { min: 1, max: 1 }
+  );
 
   // 把解密辅助函数追加到头部
   code = xorDecryptHelper + '\n' + code;
@@ -76,16 +113,34 @@ function _0xDec(arr, key) {
 
   // 3. 无害化环境变量重映射
   log('正在进行无害化环境变量名称重映射...');
-  code = code.replace(
+  code = replaceChecked(
+    'env.admin-password',
+    code,
     /const 管理员密码 = env\.ADMIN \|\| env\.admin \|\| env\.PASSWORD \|\| env\.password \|\| env\.pswd \|\| env\.TOKEN \|\| env\.KEY \|\| env\.UUID \|\| env\.uuid;/g,
-    'const 管理员密码 = env.ADMIN_PASS || env.SITE_ACCESS_KEY;'
+    'const 管理员密码 = env.ADMIN_PASS || env.SITE_ACCESS_KEY;',
+    { min: 1, max: 1 }
   );
-  code = code.replace(
+  code = replaceChecked(
+    'env.uuid',
+    code,
     /const envUUID = env\.UUID \|\| env\.uuid;/g,
-    'const envUUID = env.SITE_ACCESS_KEY;'
+    'const envUUID = env.SITE_ACCESS_KEY;',
+    { min: 1, max: 1 }
   );
-  code = code.replace(/env\.PROXYIP/g, 'env.STATIC_ASSETS_HOST');
-  code = code.replace(/env\.GO2SOCKS5/g, 'env.REMOTE_GATEWAY_CONFIG');
+  code = replaceChecked(
+    'env.proxyip',
+    code,
+    /env\.PROXYIP/g,
+    'env.STATIC_ASSETS_HOST',
+    { min: 2, max: 2 }
+  );
+  code = replaceChecked(
+    'env.go2socks5',
+    code,
+    /env\.GO2SOCKS5/g,
+    'env.REMOTE_GATEWAY_CONFIG',
+    { min: 2, max: 2 }
+  );
 
 
   // 4. 动态路由前缀自动置入与剥离，以及 HTML/重定向路径动态重写
@@ -99,9 +154,12 @@ function _0xDec(arr, key) {
 			return new Response(await nginx(), { status: 200, headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
 		}`;
 
-  code = code.replace(
+  code = replaceChecked(
+    'route.access-path',
+    code,
     /const 访问路径 = url\.pathname\.slice\(1\)\.toLowerCase\(\);/g,
-    prefixStripper
+    prefixStripper,
+    { min: 1, max: 1 }
   );
 
   // 拦截并重写返回给浏览器的后台 HTML，将其中硬编码的 /admin/ 接口调用动态加上 UUID 前缀以绕过 WAF
@@ -120,9 +178,12 @@ function _0xDec(arr, key) {
 						}
 					});`;
 
-  code = code.replace(
+  code = replaceChecked(
+    'route.admin-html',
+    code,
     /return fetch\(Pages静态页面 \+ '\/admin' \+ url\.search\);/g,
-    adminHtmlRewriter
+    adminHtmlRewriter,
+    { min: 1, max: 1 }
   );
 
   // 拦截并重写返回给浏览器的登录 HTML，将其中提交表单的 /login 接口及跳转的 /admin 地址动态加上 UUID 前缀
@@ -135,40 +196,70 @@ function _0xDec(arr, key) {
 						headers: res.headers
 					});`;
 
-  code = code.replace(
+  code = replaceChecked(
+    'route.login-html',
+    code,
     /return fetch\(Pages静态页面 \+ '\/login'\);/g,
-    loginHtmlRewriter
+    loginHtmlRewriter,
+    { min: 1, max: 1 }
   );
 
   // 动态修改重定向地址，在重定向到 admin 或 login 时自动添加前缀
-  code = code.replace(/'Location': '\/admin'/g, `'Location': '/' + _prefix + 'admin'`);
-  code = code.replace(/'Location': '\/login'/g, `'Location': '/' + _prefix + 'login'`);
+  code = replaceChecked(
+    'redirect.admin',
+    code,
+    /'Location': '\/admin'/g,
+    `'Location': '/' + _prefix + 'admin'`,
+    { min: 1, max: 1 }
+  );
+  code = replaceChecked(
+    'redirect.login',
+    code,
+    /'Location': '\/login'/g,
+    `'Location': '/' + _prefix + 'login'`,
+    { min: 2, max: 2 }
+  );
 
   // 区分大小写访问路径剥离前缀，确保后台 API 正常工作
-  code = code.replace(
+  code = replaceChecked(
+    'route.case-sensitive-path',
+    code,
     /const 区分大小写访问路径 = url\.pathname\.slice\(1\);/g,
     `let 区分大小写访问路径 = url.pathname.slice(1);
 				if (_prefix && 区分大小写访问路径.startsWith(_prefix)) {
 					区分大小写访问路径 = 区分大小写访问路径.slice(_prefix.length);
-				}`
+				}`,
+    { min: 1, max: 1 }
   );
 
   // 动态修改 /sub 相关的重定向与内部请求链接，自动注入 UUID 前缀
-  code = code.replace(
+  code = replaceChecked(
+    'redirect.sub-params',
+    code,
     /'Location': `\/sub\?\${params\.toString\(\)}`/g,
-    `'Location': '/' + _prefix + 'sub?' + params.toString()`
+    `'Location': '/' + _prefix + 'sub?' + params.toString()`,
+    { min: 1, max: 1 }
   );
-  code = code.replace(
+  code = replaceChecked(
+    'route.mixed-sub-token',
+    code,
     /'\/sub\?target=mixed&token='/g,
-    `'/' + _prefix + 'sub?target=mixed&token='`
+    `'/' + _prefix + 'sub?target=mixed&token='`,
+    { min: 1, max: 1 }
   );
-  code = code.replace(
+  code = replaceChecked(
+    'route.sub-token',
+    code,
     /'\/sub\?token='/g,
-    `'/' + _prefix + 'sub?token='`
+    `'/' + _prefix + 'sub?token='`,
+    { min: 1, max: 1 }
   );
-  code = code.replace(
+  code = replaceChecked(
+    'header.profile-web-page-url',
+    code,
     /"Profile-web-page-url": url\.protocol \+ '\/\/' \+ url\.host \+ '\/admin',/g,
-    `"Profile-web-page-url": url.protocol + '//' + url.host + '/' + _prefix + 'admin',`
+    `"Profile-web-page-url": url.protocol + '//' + url.host + '/' + _prefix + 'admin',`,
+    { min: 1, max: 1 }
   );
 
 
@@ -203,13 +294,16 @@ function _dummyMatrixMultiply(m1, m2) {
   code = dummyMathLibrary + '\n' + code;
   
   // 在入口方法 fetch 内部开头注入虚假判定引用
-  code = code.replace(
+  code = replaceChecked(
+    'entry.fetch',
+    code,
     /async fetch\(request, env, ctx\) \{/g,
     `async fetch(request, env, ctx) {
 \t\tif (Date.now() < 0) {
 \t\t\t_dummyPolynomial(3.14);
 \t\t\t_dummyMatrixMultiply([[1, 2], [3, 4]], [[5, 6], [7, 8]]);
-\t\t}`
+\t\t}`,
+    { min: 1, max: 1 }
   );
 
 

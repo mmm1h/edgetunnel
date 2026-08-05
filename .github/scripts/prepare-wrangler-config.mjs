@@ -4,6 +4,8 @@ import { resolve } from 'node:path';
 const {
   CLOUDFLARE_API_TOKEN,
   CLOUDFLARE_ACCOUNT_ID,
+  WORKER_NAME,
+  CUSTOM_DOMAIN,
   KV_NAMESPACE_TITLE = 'edgetunnel',
   KV_BINDING_NAME = 'KV',
   WRANGLER_CONFIG_PATH = 'wrangler.toml',
@@ -23,6 +25,57 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function upsertTopLevelAssignment(config, eol, key, value) {
+  const lines = config.split(/\r?\n/);
+  const assignmentPattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`);
+  const kept = [];
+  let replaced = false;
+
+  for (const line of lines) {
+    if (assignmentPattern.test(line)) {
+      if (!replaced) {
+        kept.push(`${key} = ${value}`);
+        replaced = true;
+      }
+    } else {
+      kept.push(line);
+    }
+  }
+
+  if (!replaced) {
+    const firstTableIndex = kept.findIndex((line) => /^\s*\[/.test(line));
+    kept.splice(firstTableIndex === -1 ? kept.length : firstTableIndex, 0, `${key} = ${value}`);
+  }
+
+  return kept.join(eol);
+}
+
+function getTableName(line) {
+  const match = line.match(/^\s*\[\[?([^\]]+)\]\]?\s*(?:#.*)?$/);
+  return match?.[1].trim() ?? null;
+}
+
+function removeTableBlocks(config, eol, shouldRemove) {
+  const lines = config.split(/\r?\n/);
+  const kept = [];
+
+  for (let index = 0; index < lines.length;) {
+    const tableName = getTableName(lines[index]);
+    if (tableName && shouldRemove(tableName)) {
+      index += 1;
+      while (index < lines.length && !getTableName(lines[index])) {
+        index += 1;
+      }
+      continue;
+    }
+
+    kept.push(lines[index]);
+    index += 1;
+  }
+
+  return kept.join(eol);
+}
+
 function upsertKvNamespaceBinding(config, eol, bindingName, namespaceId) {
   const lines = config.split(/\r?\n/);
   const kept = [];
@@ -36,7 +89,7 @@ function upsertKvNamespaceBinding(config, eol, bindingName, namespaceId) {
     if (/^\s*\[\[\s*kv_namespaces\s*\]\]\s*$/.test(lines[index])) {
       const block = [lines[index]];
       index += 1;
-      while (index < lines.length && !/^\s*(\[\[.*\]\]|\[.*\])\s*$/.test(lines[index])) {
+      while (index < lines.length && !getTableName(lines[index])) {
         block.push(lines[index]);
         index += 1;
       }
@@ -137,6 +190,8 @@ async function ensureNamespace(title) {
   return created;
 }
 
+if (!WORKER_NAME?.trim()) fail('缺少环境变量 `WORKER_NAME`。');
+if (!CUSTOM_DOMAIN?.trim()) fail('缺少环境变量 `CUSTOM_DOMAIN`。');
 if (!CLOUDFLARE_API_TOKEN) fail('缺少环境变量 `CLOUDFLARE_API_TOKEN`。');
 if (!CLOUDFLARE_ACCOUNT_ID) fail('缺少环境变量 `CLOUDFLARE_ACCOUNT_ID`。');
 
@@ -146,12 +201,44 @@ const sourceConfig = readFileSync(sourcePath, 'utf8');
 const eol = sourceConfig.includes('\r\n') ? '\r\n' : '\n';
 
 const namespace = await ensureNamespace(KV_NAMESPACE_TITLE);
-const deployConfig = `${upsertKvNamespaceBinding(
-  sourceConfig,
+let deployConfig = sourceConfig;
+deployConfig = upsertTopLevelAssignment(
+  deployConfig,
+  eol,
+  'name',
+  `"${escapeTomlString(WORKER_NAME.trim())}"`,
+);
+deployConfig = upsertTopLevelAssignment(deployConfig, eol, 'main', '"app.js"');
+deployConfig = upsertTopLevelAssignment(deployConfig, eol, 'workers_dev', 'false');
+deployConfig = removeTableBlocks(
+  deployConfig,
+  eol,
+  (tableName) => tableName === 'routes'
+    || tableName === 'observability'
+    || tableName.startsWith('observability.'),
+);
+
+const injectedBlocks = [
+  '[[routes]]',
+  `pattern = "${escapeTomlString(CUSTOM_DOMAIN.trim())}"`,
+  'custom_domain = true',
+  '',
+  '[observability]',
+  '[observability.logs]',
+  'enabled = true',
+  'invocation_logs = true',
+  '',
+  '[observability.traces]',
+].join(eol);
+
+deployConfig = `${deployConfig.trimEnd()}${eol}${eol}${injectedBlocks}`;
+deployConfig = upsertKvNamespaceBinding(
+  deployConfig,
   eol,
   KV_BINDING_NAME,
   namespace.id,
-)}${eol}`;
+);
+const serializedConfig = `${deployConfig}${eol}`;
 
-writeFileSync(outputPath, deployConfig, 'utf8');
+writeFileSync(outputPath, serializedConfig, 'utf8');
 console.log(`Prepared ${outputPath} with KV binding "${KV_BINDING_NAME}" -> "${KV_NAMESPACE_TITLE}".`);

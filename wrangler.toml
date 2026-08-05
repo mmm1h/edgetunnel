@@ -1,20 +1,8 @@
-name = 'homepage'
-main = "app.js"
+name = "v20251104"
+main = "_worker.js"
 compatibility_date = "2025-11-04"
 keep_vars = true
-workers_dev = false
 
-[[routes]]
-pattern = "x8m2k5.hmhi.top"
-custom_domain = true
-
-[[kv_namespaces]]
-binding = "KV"
-id = "09bc1aff30474da3ac91e1b90a396759"
-
-[observability]
-[observability.logs]
-enabled = true
-invocation_logs = true
-
-[observability.traces]
+#[[kv_namespaces]]
+#binding = "KV"			#KV绑定名默认不可修改
+#id = ""				#KV数据库id

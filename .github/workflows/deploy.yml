@@ -12,6 +12,10 @@ concurrency:
   group: deploy-to-cloudflare-main
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  deployments: write
+
 jobs:
   deploy_to_cloudflare:
     name: Deploy to Cloudflare Workers
@@ -27,40 +31,97 @@ jobs:
 
       - name: Decide whether deployment is needed
         id: deploy_gate
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          should_deploy=false
-          reason="No new commits detected on main."
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execFileSync } = require('node:child_process');
+            const currentSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+              encoding: 'utf8',
+            }).trim();
 
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            should_deploy=true
-            reason="Manual dispatch."
-          else
-            current_sha=$(git rev-parse HEAD)
-            if [ "$current_sha" != "$WORKFLOW_HEAD_SHA" ]; then
-              should_deploy=true
-              reason="Main changed after upstream sync."
-            fi
-          fi
+            core.setOutput('current_sha', currentSha);
 
-          echo "should_deploy=$should_deploy" >> "$GITHUB_OUTPUT"
-          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+            if (context.eventName === 'workflow_dispatch') {
+              core.setOutput('should_deploy', 'true');
+              core.setOutput('reason', `Manual dispatch forces deployment of ${currentSha}.`);
+              return;
+            }
 
-      - name: Cleanup Old Worker and Domain
-        if: ${{ steps.deploy_gate.outputs.should_deploy == 'true' }}
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: node .github/scripts/cleanup-old-worker.mjs
+            const { owner, repo } = context.repo;
+            let lastSuccessfulSha = null;
+
+            try {
+              let page = 1;
+
+              while (lastSuccessfulSha === null) {
+                const { data: deployments } = await github.rest.repos.listDeployments({
+                  owner,
+                  repo,
+                  environment: 'production',
+                  per_page: 100,
+                  page,
+                });
+
+                for (const deployment of deployments) {
+                  const statuses = await github.paginate(
+                    github.rest.repos.listDeploymentStatuses,
+                    {
+                      owner,
+                      repo,
+                      deployment_id: deployment.id,
+                      per_page: 100,
+                    },
+                  );
+
+                  if (statuses.some((status) => status.state === 'success')) {
+                    lastSuccessfulSha = deployment.sha;
+                    break;
+                  }
+                }
+
+                if (lastSuccessfulSha !== null || deployments.length < 100) {
+                  break;
+                }
+
+                page += 1;
+              }
+            } catch (error) {
+              core.warning(`Could not read production deployment history: ${error.message}`);
+              core.setOutput('should_deploy', 'true');
+              core.setOutput(
+                'reason',
+                `Deployment history lookup failed; deploying ${currentSha} as a safe fallback.`,
+              );
+              return;
+            }
+
+            if (lastSuccessfulSha === null) {
+              core.setOutput('should_deploy', 'true');
+              core.setOutput(
+                'reason',
+                `No successful production deployment was found; deploying ${currentSha}.`,
+              );
+            } else if (currentSha === lastSuccessfulSha) {
+              core.setOutput('should_deploy', 'false');
+              core.setOutput(
+                'reason',
+                `${currentSha} is already the latest successful production deployment.`,
+              );
+            } else {
+              core.setOutput('should_deploy', 'true');
+              core.setOutput(
+                'reason',
+                `Main HEAD ${currentSha} differs from the last successful deployment ${lastSuccessfulSha}.`,
+              );
+            }
 
       - name: Prepare Wrangler config with KV binding
         if: ${{ steps.deploy_gate.outputs.should_deploy == 'true' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_NAME: ${{ secrets.WORKER_NAME }}
+          CUSTOM_DOMAIN: ${{ secrets.CUSTOM_DOMAIN }}
           KV_NAMESPACE_TITLE: edgetunnel
           KV_BINDING_NAME: KV
         run: node .github/scripts/prepare-wrangler-config.mjs
@@ -68,7 +129,7 @@ jobs:
       - name: Obfuscate Worker Script
         if: ${{ steps.deploy_gate.outputs.should_deploy == 'true' }}
         run: |
-          npm install javascript-obfuscator
+          npm ci
           node .github/scripts/obfuscate.mjs
 
       - name: Deploy to Cloudflare Workers
@@ -78,6 +139,48 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy --config wrangler.deploy.toml
+
+      - name: Record successful production deployment
+        if: ${{ success() && steps.deploy_gate.outputs.should_deploy == 'true' }}
+        uses: actions/github-script@v7
+        env:
+          DEPLOY_SHA: ${{ steps.deploy_gate.outputs.current_sha }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const sha = process.env.DEPLOY_SHA;
+            const { data: deployment } = await github.rest.repos.createDeployment({
+              owner,
+              repo,
+              ref: sha,
+              environment: 'production',
+              auto_merge: false,
+              required_contexts: [],
+              transient_environment: false,
+              description: 'Cloudflare Workers production deployment',
+            });
+
+            if (typeof deployment !== 'object' || deployment === null) {
+              throw new Error(`GitHub did not create a deployment for ${sha}.`);
+            }
+
+            await github.rest.repos.createDeploymentStatus({
+              owner,
+              repo,
+              deployment_id: deployment.id,
+              state: 'success',
+              environment: 'production',
+              description: 'Deployed successfully to Cloudflare Workers',
+            });
+
+            core.info(`Recorded ${sha} as the latest successful production deployment.`);
+
+      - name: Cleanup Old Worker and Domain
+        if: ${{ steps.deploy_gate.outputs.should_deploy == 'true' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node .github/scripts/cleanup-old-worker.mjs
 
       - name: Deployment summary
         run: echo "${{ steps.deploy_gate.outputs.reason }}"
